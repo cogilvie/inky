@@ -12,7 +12,7 @@
 //!          configuration is
 //! - 7:30 - The time the EEPROM was written
 
-use crate::inky::Color as InkyColor;
+// use crate::inky::Color as InkyColor;
 use anyhow::{bail, ensure, Context, Error, Result};
 use chrono::NaiveDateTime;
 use log::error;
@@ -93,68 +93,45 @@ impl TryFrom<&[u8]> for PascalString {
 #[derive(Debug, FromPrimitive, ToPrimitive, Clone)]
 #[repr(u8)]
 /// The color configuration a display supports, as encoded in the EEPROM
-pub enum Color {
+pub enum ColorMode {
     Black = 1,
     Red = 2,
     Yellow = 3,
     SevenColor = 5,
+    Spectra6 = 6,
+    RedYellow = 7,
 }
 
-impl TryFrom<Color> for InkyColor {
-    type Error = Error;
+// impl TryFrom<ColorMode> for InkyColor {
+//     type Error = Error;
 
-    /// Convert the EEPROM color representation to the drawing representation for the display
-    /// color
-    fn try_from(value: Color) -> Result<Self> {
-        Ok(match value {
-            Color::Black => InkyColor::Black,
-            Color::Red => InkyColor::Red,
-            Color::Yellow => InkyColor::Yellow,
-            Color::SevenColor => bail!("Cannot convert EEPROM color to Inky Color"),
-        })
-    }
-}
+//     /// Convert the EEPROM color representation to the drawing representation for the display
+//     /// color
+//     fn try_from(value: ColorMode) -> Result<Self> {
+//         Ok(match value {
+//             ColorMode::Black => InkyColor::Black,
+//             ColorMode::Red => InkyColor::Red,
+//             ColorMode::Yellow => InkyColor::Yellow,
+//             ColorMode::SevenColor | ColorMode::Spectra6 | ColorMode::RedYellow => bail!("Cannot convert EEPROM color to Inky Color"),
+//         })
+//     }
+// }
 
-impl TryFrom<Color> for u8 {
+impl TryFrom<ColorMode> for u8 {
     type Error = Error;
 
     /// Convert the color value back to a primitive u8
-    fn try_from(value: Color) -> Result<Self> {
-        ConvertToPrimitive::to_u8(&value).context(format!("Invalid Color value {:?}", value))
+    fn try_from(value: ColorMode) -> Result<Self> {
+        ConvertToPrimitive::to_u8(&value).context(format!("Invalid ColorMode value {:?}", value))
     }
 }
 
-impl TryFrom<u8> for Color {
+impl TryFrom<u8> for ColorMode {
     type Error = Error;
 
     /// Convert a primitive u8 value read from EEPROM to a color value
     fn try_from(value: u8) -> Result<Self> {
-        ConvertFromPrimitive::from_u8(value).context(format!("Invalid Color value {}", value))
-    }
-}
-
-#[derive(Debug, FromPrimitive, ToPrimitive, Clone)]
-#[repr(u8)]
-/// Reserved for future products, PCB variant of the e-ink display
-pub enum PcbVariant {
-    V1 = 12,
-}
-
-impl TryFrom<PcbVariant> for u8 {
-    type Error = Error;
-
-    /// Convert a pcb variant value back to a primitive u8 value
-    fn try_from(value: PcbVariant) -> Result<Self> {
-        ConvertToPrimitive::to_u8(&value).context(format!("Invalid PcbVariant value {:?}", value))
-    }
-}
-
-impl TryFrom<u8> for PcbVariant {
-    type Error = Error;
-
-    /// Convert a primitive u8 value read from EEPROM to a PCB variant
-    fn try_from(value: u8) -> Result<Self> {
-        ConvertFromPrimitive::from_u8(value).context(format!("Invalid PcbVariant value {}", value))
+        ConvertFromPrimitive::from_u8(value).context(format!("Invalid ColorMode value {}", value))
     }
 }
 
@@ -179,6 +156,10 @@ pub enum DisplayVariant {
     // RedWHatSsd1683 = 18,
     // YellowWHatSsd1683 = 19,
     // SevenColor800x480Ac073Tc1A = 20,
+    // Spectra 6 13.3 1600 x 1200 (EL133UF1) = 21,
+    // Spectra 6 7.3 800 x 480 (E673) = 22
+    // Red/Yellow pHAT (JD79661) = 23
+    // Red/Yellow wHAT (JD79668) = 24
     Phat,
     PhatSsd1608,
     What,
@@ -186,6 +167,10 @@ pub enum DisplayVariant {
     Uc8159_640x400,
     WhatSsd1683,
     Ac073Tc1A,
+    EL133UF1,
+    E673,
+    JD79661,
+    JD79668,
 }
 
 impl TryFrom<u8> for DisplayVariant {
@@ -200,7 +185,11 @@ impl TryFrom<u8> for DisplayVariant {
             14 => Self::Uc8159_600x448,
             15 | 16 => Self::Uc8159_640x400,
             17 | 18 | 19 => Self::WhatSsd1683,
-            20 => Self::Ac073Tc1A,
+            20 => Self::EL133UF1,
+            21 => Self::E673,
+            22 => Self::E673,
+            23 => Self::JD79661,
+            24 => Self::JD79668,
             _ => bail!("Invalid value {} for DisplayVariant", value),
         })
     }
@@ -212,8 +201,8 @@ impl TryFrom<u8> for DisplayVariant {
 pub struct EEPROM {
     width: u16,
     height: u16,
-    color: Color,
-    pcb_variant: PcbVariant,
+    color: ColorMode,
+    pcb_variant: u8,
     display_variant: DisplayVariant,
     eeprom_write_time: PascalString,
 }
@@ -240,8 +229,8 @@ impl TryFrom<&[u8]> for EEPROM {
     fn try_from(value: &[u8]) -> Result<Self> {
         let width = u16::from_le_bytes(value[..2].try_into()?);
         let height = u16::from_le_bytes(value[2..4].try_into()?);
-        let color = Color::try_from(value[4])?;
-        let pcb_variant = PcbVariant::try_from(value[5])?;
+        let color = ColorMode::try_from(value[4])?;
+        let pcb_variant = value[5];
         let display_variant = DisplayVariant::try_from(value[6])?;
         let eeprom_write_time_bytes = value[7..]
             .iter()
@@ -277,10 +266,12 @@ impl EEPROM {
     pub fn try_new_tries(max_tries: usize) -> Result<Self> {
         let mut i2c_bus = I2c::with_bus(INKY_BUS)?;
 
-        for _ in 0..max_tries {
+        for i in 0..max_tries {
+            println!{"Trying to connect: {}", i}
             i2c_bus.set_slave_address(Self::ADDRESS)?;
             i2c_bus.write(&[0x00; 2])?;
             // sleep(Duration::from_millis(1000));
+             println!{"Reading: {}", i}
             let buffer = &mut [0x00; 29];
             i2c_bus.set_slave_address(Self::ADDRESS)?;
             let read = i2c_bus.read(buffer)?;
@@ -290,6 +281,7 @@ impl EEPROM {
                     return Ok(eeprom);
                 }
                 Err(e) => {
+                    eprintln!{"Not parsed: {:?} {}",buffer, e}    
                     error!("Failed to initialize eeprom, retrying: {}", e);
                 }
             }
@@ -310,13 +302,13 @@ impl EEPROM {
     }
 
     /// Get the color value of the display
-    pub fn color(&self) -> Color {
+    pub fn color(&self) -> ColorMode {
         self.color.clone()
     }
 
     /// Get the PCB variant of the display
-    pub fn pcb_variant(&self) -> PcbVariant {
-        self.pcb_variant.clone()
+    pub fn pcb_variant(&self) -> u8 {
+        self.pcb_variant
     }
 
     /// Get the display variant of the display
