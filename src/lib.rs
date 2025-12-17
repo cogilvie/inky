@@ -6,4 +6,6 @@
 
 pub mod eeprom;
 pub mod inky;
+pub mod hardware;
+pub mod core;
 mod lut;
