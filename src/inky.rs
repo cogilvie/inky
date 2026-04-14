@@ -6,6 +6,7 @@ use crate::{
         display::{InkyDisplay},
         inkye673::InkyE673,
         inkywhat::InkyWhat,
+        inkyphatssd1608::InkyPhatSsd1608,
     },
     core::colors::Color,
 };
@@ -179,6 +180,9 @@ impl TryFrom<EEPROM> for Inky {
             },
             DisplayVariant::What => {
                 Ok(Self {display : Box::new(InkyWhat::new(value)?), canvas: canvas })
+            },
+            DisplayVariant::PhatSsd1608 => {
+                Ok(Self {display : Box::new(InkyPhatSsd1608::new(value)?), canvas: canvas })
             },
             _ => bail!("Unsupported display variant"),
         }
