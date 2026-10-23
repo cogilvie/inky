@@ -11,6 +11,17 @@ use rppal::{
 use anyhow::Result;
 use std::time::Duration;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RefreshSpeed {
+    /// Dynamic frame rate.
+    #[default]
+    Normal,
+    /// Medium refresh rate.
+    Medium,
+    /// Fast refresh rate.
+    Fast,
+}
+
 pub struct SpiPacket {
     pub command: u8,
     pub data: Option<Vec<u8>>,

@@ -2,7 +2,7 @@ use crate::{
     core::colors::Color,
     eeprom::{DisplayVariant, EEPROM},
     hardware::display::{
-        add_inky_display_type, InkyConnection, InkyConnectionProvider, InkyDisplay, SpiPacket,
+        InkyConnection, InkyConnectionProvider, InkyDisplay, RefreshSpeed, SpiPacket,
     },
 };
 
@@ -46,18 +46,35 @@ fn as_u8(color: &Color) -> u8 {
     }
 }
 
-add_inky_display_type!(InkyE673);
+pub struct InkyE673 {
+    connection: InkyConnection,
+    speed: RefreshSpeed,
+}
 
-impl InkyDisplay for InkyE673 {
-    fn new(eeprom: EEPROM) -> Result<Self> {
+impl InkyConnectionProvider for InkyE673 {
+    fn connection(&mut self) -> &InkyConnection {
+        &self.connection
+    }
+}
+
+impl InkyE673 {
+    /// Create an E673 driver using the requested refresh speed.
+    pub fn new_with_speed(eeprom: EEPROM, speed: RefreshSpeed) -> Result<Self> {
         ensure!(
             matches!(eeprom.display_variant(), DisplayVariant::E673),
             "Only the Inky E673 is supported!"
         );
 
-        Ok(Self {
-            connection: InkyConnection::new(eeprom)?,
-        })
+        let connection = InkyConnection::new(eeprom)?;
+        connection.spi.set_clock_speed(10_000_000)?;
+
+        Ok(Self { connection, speed })
+    }
+}
+
+impl InkyDisplay for InkyE673 {
+    fn new(eeprom: EEPROM) -> Result<Self> {
+        Self::new_with_speed(eeprom, RefreshSpeed::default())
     }
 
     fn reset(&mut self) -> Result<()> {
@@ -105,7 +122,11 @@ impl InkyDisplay for InkyE673 {
         ))?;
         self.spi_send(SpiPacket::with_data(
             DisplayCommands::EL673_PLL as u8,
-            vec![0x08],
+            vec![match self.speed {
+                RefreshSpeed::Normal => 0x08,
+                RefreshSpeed::Medium => 0x04,
+                RefreshSpeed::Fast => 0x07,
+            }],
         ))?;
         self.spi_send(SpiPacket::with_data(
             DisplayCommands::EL673_CDI as u8,
@@ -151,6 +172,12 @@ impl InkyDisplay for InkyE673 {
         ))?;
         self.wait(Some(Duration::from_millis(300)))?;
 
+        self.spi_send(SpiPacket::with_data(
+            DisplayCommands::EL673_PSR as u8,
+            vec![0x4F, 0x6E],
+        ))?;
+        self.wait(Some(Duration::from_millis(300)))?;
+
         Ok(())
     }
 
@@ -172,7 +199,6 @@ impl InkyDisplay for InkyE673 {
     fn spi_send(&mut self, packet: SpiPacket) -> Result<()> {
         self.connection.cs.set_low();
         self.connection.dc.set_low();
-        sleep(Duration::from_millis(300));
         self.connection.spi.write(&[packet.command])?;
 
         if let Some(data) = packet.data {

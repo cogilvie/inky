@@ -3,7 +3,7 @@
 use crate::{
     eeprom::{DisplayVariant, EEPROM},
     hardware::{
-        display::{InkyDisplay},
+        display::{InkyDisplay, RefreshSpeed},
         inkye673::InkyE673,
         inkywhat::InkyWhat,
         inkyphatssd1608::InkyPhatSsd1608,
@@ -175,15 +175,18 @@ impl TryFrom<EEPROM> for Inky {
         print!("Display dimensions: {}x{}\n", value.width(), value.height());
         let canvas = Canvas::new(value.width() as usize, value.height() as usize);
         match value.display_variant() {
-            DisplayVariant::E673 => {
-                Ok(Self {display : Box::new(InkyE673::new(value)?), canvas: canvas })
-            },
-            DisplayVariant::What => {
-                Ok(Self {display : Box::new(InkyWhat::new(value)?), canvas: canvas })
-            },
-            DisplayVariant::PhatSsd1608 => {
-                Ok(Self {display : Box::new(InkyPhatSsd1608::new(value)?), canvas: canvas })
-            },
+            DisplayVariant::E673 => Ok(Self {
+                display: Box::new(InkyE673::new_with_speed(value, RefreshSpeed::Fast)?),
+                canvas,
+            }),
+            DisplayVariant::What => Ok(Self {
+                display: Box::new(InkyWhat::new(value)?),
+                canvas,
+            }),
+            DisplayVariant::PhatSsd1608 => Ok(Self {
+                display: Box::new(InkyPhatSsd1608::new(value)?),
+                canvas,
+            }),
             _ => bail!("Unsupported display variant"),
         }
     }
