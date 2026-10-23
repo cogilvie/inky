@@ -1,0 +1,49 @@
+use rand::Rng;
+
+ use inky::core::colors::Color;
+
+
+fn main() {
+    let eeprom = inky::eeprom::EEPROM::try_new().expect("Failed to initialize eeprom");
+
+    print!("EEPROM initialized successfully!\n {:?} {}x{} {:?}", eeprom.display_variant(), eeprom.width(), eeprom.height(), eeprom.color());
+    let mut inky = inky::inky::Inky::try_from(eeprom).expect("Failed to create Inky");
+
+    let canvas = inky.canvas_mut();
+
+    let mut rng = rand::rng();
+    let colors: [Color; 5] = [Color::Red, Color::Green, Color::Blue, Color::Yellow, Color::Black];
+
+    let width = canvas.width();
+    let height = canvas.height();
+
+    for _ in 0..10 {
+        let size = rng.random_range(20..50);
+        let x = rng.random_range(0..(width - size));
+        let y = rng.random_range(0..(height - size));
+        let color = &colors[rng.random_range(0..colors.len())];
+
+        canvas.draw(inky::inky::Rectangle::new((x, y), (x + size, y + size)), color);
+    }
+
+        let canvas = inky.canvas_mut(); 
+
+    for _ in 0..50 {
+        let size = rng.random_range(20..100);
+        let x = rng.random_range(0..(width - size));
+        let y = rng.random_range(0..(height - size));
+        let color = &colors[rng.random_range(0..colors.len())];
+
+        canvas.draw(inky::inky::Rectangle::new((x, y), (x + size, y + size)), color);
+    }
+
+    inky.update_region(0, 0, width/2, height/2).expect("Failed to update display"); 
+    inky.update_region(width/2, 0, width/2, height/2).expect("Failed to update display"); 
+    inky.update_region(0, height/2, width/2, height/2).expect("Failed to update display"); 
+    inky.update_region(width/2, height/2, width/2, height/2).expect("Failed to update display"); 
+
+
+
+    inky.update().expect("Failed to update display"); 
+    print!("Display update complete!\n");
+}

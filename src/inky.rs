@@ -11,7 +11,7 @@ use crate::{
     core::colors::Color,
 };
 
-use anyhow::{Error, Result, bail};
+use anyhow::{Error, Result, bail, ensure};
 
 pub trait Drawable {
     fn coordinates(&self) -> Vec<(usize, usize)>;
@@ -164,6 +164,36 @@ impl Inky {
         let buf = self.display.convert(&self.canvas.pixels)?;
         self.display.update(buf)
     }
+
+    /// Refresh a rectangular region of the canvas when the display supports it.
+    ///
+    /// Coordinates are measured from the canvas's top-left corner. Partial updates are
+    /// currently supported only by the Inky E673.
+    pub fn update_region(
+        &mut self,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+    ) -> Result<()> {
+        ensure!(width > 0 && height > 0, "Update region must not be empty");
+        let x_end = x
+            .checked_add(width)
+            .ok_or_else(|| anyhow::anyhow!("Update region x-coordinate overflow"))?;
+        let y_end = y
+            .checked_add(height)
+            .ok_or_else(|| anyhow::anyhow!("Update region y-coordinate overflow"))?;
+        ensure!(
+            x_end <= self.canvas.width && y_end <= self.canvas.height,
+            "Update region is outside the canvas bounds"
+        );
+
+        let pixels = self.canvas.pixels[y..y_end]
+            .iter()
+            .map(|row| row[x..x_end].to_vec())
+            .collect();
+        self.display.update_region(x, y, pixels)
+    }
     
 }
 
@@ -188,8 +218,8 @@ impl TryFrom<EEPROM> for Inky {
                 canvas,
             }),
             _ => bail!("Unsupported display variant"),
-        }
-    }
+        }   
+    } 
 }
 
 

@@ -8,7 +8,7 @@ use rppal::{
     spi::{Bus, Mode, SlaveSelect as SecondarySelect, Spi},
 };
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -76,6 +76,9 @@ pub trait InkyDisplay : InkyConnectionProvider {
     fn reset(&mut self) -> Result<()>;
     fn convert(&self, buf: &Vec<Vec<Color>>) -> Result<Vec<u8>>;
     fn update(&mut self, buf: Vec<u8>) -> Result<()>;
+    fn update_region(&mut self, _x: usize, _y: usize, _pixels: Vec<Vec<Color>>) -> Result<()> {
+        bail!("Partial updates are not supported by this display");
+    }
     fn wait(&mut self, timeout: Option<Duration>) -> Result<()>;
     fn spi_send(&mut self, packet: SpiPacket) -> Result<()>;
 }

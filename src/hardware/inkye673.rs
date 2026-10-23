@@ -8,7 +8,7 @@ use crate::{
 
 use rppal::gpio::Trigger;
 
-use anyhow::{ensure, Result};
+use anyhow::{ensure, Context, Result};
 
 use std::{thread::sleep, time::Duration};
 
@@ -26,6 +26,7 @@ enum DisplayCommands {
     EL673_DTM1 = 0x10,
     EL673_DSP = 0x11,
     EL673_DRF = 0x12,
+    EL673_PARTIAL_WINDOW = 0x83,
     EL673_PLL = 0x30,
     EL673_CDI = 0x50,
     EL673_TCON = 0x60,
@@ -69,6 +70,20 @@ impl InkyE673 {
         connection.spi.set_clock_speed(10_000_000)?;
 
         Ok(Self { connection, speed })
+    }
+
+    fn write_data(&mut self, data: &[u8]) -> Result<()> {
+        self.connection.cs.set_low();
+        self.connection.dc.set_high();
+        let result = (|| {
+            for chunk in data.chunks(4096) {
+                self.connection.spi.write(chunk)?;
+            }
+            Ok(())
+        })();
+        self.connection.cs.set_high();
+        self.connection.dc.set_low();
+        result
     }
 }
 
@@ -181,6 +196,78 @@ impl InkyDisplay for InkyE673 {
         Ok(())
     }
 
+    fn update_region(&mut self, x: usize, y: usize, pixels: Vec<Vec<Color>>) -> Result<()> {
+        ensure!(!pixels.is_empty(), "Partial update height must be non-zero");
+        let width = pixels[0].len();
+        ensure!(width > 0, "Partial update width must be non-zero");
+        ensure!(
+            pixels.iter().all(|row| row.len() == width),
+            "Partial update rows must have equal widths"
+        );
+
+        let height = pixels.len();
+        let x_end = x
+            .checked_add(width)
+            .context("Partial update x-coordinate overflow")?;
+        let y_end = y
+            .checked_add(height)
+            .context("Partial update y-coordinate overflow")?;
+        ensure!(
+            x_end <= self.connection.eeprom.width() as usize
+                && y_end <= self.connection.eeprom.height() as usize,
+            "Partial update region is outside the display bounds"
+        );
+
+        let x_last = x_end - 1;
+        let y_last = y_end - 1;
+        let window = vec![
+            ((x >> 8) & 0x03) as u8,
+            (x & 0xFF) as u8,
+            ((x_last >> 8) & 0x03) as u8,
+            (x_last & 0xFF) as u8,
+            ((y >> 8) & 0x03) as u8,
+            (y & 0xFF) as u8,
+            ((y_last >> 8) & 0x03) as u8,
+            (y_last & 0xFF) as u8,
+            0x01,
+        ];
+
+        self.reset()?;
+        self.spi_send(SpiPacket::with_data(
+            DisplayCommands::EL673_PARTIAL_WINDOW as u8,
+            window,
+        ))?;
+        self.wait(Some(Duration::from_millis(300)))?;
+
+        self.spi_send(SpiPacket::with_data(
+            DisplayCommands::EL673_DTM1 as u8,
+            Vec::new(),
+        ))?;
+        for row in &pixels {
+            self.write_data(&encode_partial_row(row))?;
+        }
+        self.wait(Some(Duration::from_millis(300)))?;
+
+        self.spi_send(SpiPacket::no_data(DisplayCommands::EL673_PON as u8))?;
+        self.wait(Some(Duration::from_millis(300)))?;
+        self.spi_send(SpiPacket::with_data(
+            DisplayCommands::EL673_BTST2 as u8,
+            vec![0x6F, 0x1F, 0x17, 0x49],
+        ))?;
+        self.spi_send(SpiPacket::with_data(
+            DisplayCommands::EL673_DRF as u8,
+            vec![0x00],
+        ))?;
+        self.wait(Some(Duration::from_millis(32000)))?;
+        self.spi_send(SpiPacket::with_data(
+            DisplayCommands::EL673_POF as u8,
+            vec![0x00],
+        ))?;
+        self.wait(Some(Duration::from_millis(300)))?;
+
+        Ok(())
+    }
+
     fn wait(&mut self, timeout: Option<Duration>) -> Result<()> {
         // If the busy_pin is *high* (pulled up by host)
         // then assume we're not getting a signal from inky
@@ -226,5 +313,33 @@ impl InkyDisplay for InkyE673 {
             }
         }
         Ok(result)
+    }
+}
+
+fn encode_partial_row(row: &[Color]) -> Vec<u8> {
+    row.chunks(2)
+        .map(|pair| {
+            let first = as_u8(&pair[0]);
+            let second = pair.get(1).map(as_u8).unwrap_or(0);
+            (first << 4) | second
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::encode_partial_row;
+    use crate::core::colors::Color;
+
+    #[test]
+    fn encodes_even_partial_rows_as_color_nibbles() {
+        let row = [Color::Black, Color::White, Color::Red, Color::Green];
+        assert_eq!(encode_partial_row(&row), [0x01, 0x36]);
+    }
+
+    #[test]
+    fn pads_the_low_nibble_of_odd_partial_rows() {
+        let row = [Color::Red, Color::Yellow, Color::Blue];
+        assert_eq!(encode_partial_row(&row), [0x32, 0x50]);
     }
 }
